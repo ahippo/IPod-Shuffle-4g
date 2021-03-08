@@ -199,7 +199,6 @@ class Record(object):
         self.playlist_voiceover = parent.playlist_voiceover
         self.rename = parent.rename
         self.trackgain = parent.trackgain
-        self.original_filenames = parent.original_filenames
 
     def __getitem__(self, item):
         if item not in list(self._struct.keys()):
@@ -365,14 +364,7 @@ class Track(Record):
         if os.path.splitext(filename)[1].lower() in (".m4a", ".m4b", ".m4p", ".aa"):
             self["filetype"] = 2
 
-        if self.original_filenames is not None:
-            try:
-                filename_for_text = self.original_filenames[filename]
-                verboseprint("Found original filename for {0}: {1}".format(filename, filename_for_text))
-            except KeyError as e:
-                filename_for_text = filename
-
-        text = os.path.splitext(os.path.basename(filename_for_text))[0]
+        text = os.path.splitext(os.path.basename(filename))[0]
 
         # Try to get album and artist information with mutagen
         if mutagen:
@@ -586,7 +578,7 @@ class Playlist(Record):
         return output + chunks
 
 class Shuffler(object):
-    def __init__(self, path, track_voiceover=False, playlist_voiceover=False, rename=False, trackgain=0, auto_dir_playlists=None, auto_id3_playlists=None, original_filenames=None):
+    def __init__(self, path, track_voiceover=False, playlist_voiceover=False, rename=False, trackgain=0, auto_dir_playlists=None, auto_id3_playlists=None):
         self.path = os.path.abspath(path)
         self.tracks = []
         self.albums = []
@@ -599,7 +591,6 @@ class Shuffler(object):
         self.trackgain = trackgain
         self.auto_dir_playlists = auto_dir_playlists
         self.auto_id3_playlists = auto_id3_playlists
-        self.original_filenames = original_filenames
 
     def initialize(self):
       # remove existing voiceover files (they are either useless or will be overwritten anyway)
@@ -671,7 +662,7 @@ class Shuffler(object):
 # Use SVOX pico2wave and RHVoice to produce voiceover data
 #
 
-def check_unicode(path, original_filenames=None):
+def check_unicode(path):
     ret_flag = False # True if there is a recognizable file within this level
     for item in os.listdir(path):
         if os.path.isfile(os.path.join(path, item)):
@@ -682,10 +673,8 @@ def check_unicode(path, original_filenames=None):
                     dest = os.path.join(path, hash_error_unicode(item)) + os.path.splitext(item)[1].lower()
                     print('Renaming %s -> %s' % (src, dest))
                     os.rename(src, dest)
-                    if original_filenames is not None:
-                        original_filenames[dest] = item
         else:
-            ret_flag = (check_unicode(os.path.join(path, item), original_filenames=original_filenames) or ret_flag)
+            ret_flag = (check_unicode(os.path.join(path, item)) or ret_flag)
             if ret_flag and raises_unicode_error(item):
                 src = os.path.join(path, item)
                 new_name = hash_error_unicode(item)
@@ -763,9 +752,8 @@ if __name__ == '__main__':
 
     checkPathValidity(result.path)
 
-    original_filenames = {}
     if result.rename_unicode:
-        check_unicode(result.path, original_filenames)
+        check_unicode(result.path)
 
     if not mutagen:
         print("Warning: No mutagen found. Database will not contain any album nor artist information.")
@@ -786,8 +774,7 @@ if __name__ == '__main__':
                        rename=result.rename_unicode,
                        trackgain=result.track_gain,
                        auto_dir_playlists=result.auto_dir_playlists,
-                       auto_id3_playlists=result.auto_id3_playlists,
-                       original_filenames=original_filenames)
+                       auto_id3_playlists=result.auto_id3_playlists)
     shuffle.initialize()
     shuffle.populate()
     shuffle.write_database()

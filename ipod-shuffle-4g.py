@@ -14,6 +14,7 @@ import shutil
 import re
 import tempfile
 import signal
+import json
 
 # External libraries
 try:
@@ -23,6 +24,7 @@ except ImportError:
 
 audio_ext = (".mp3", ".m4a", ".m4b", ".m4p", ".aa", ".wav")
 list_ext = (".pls", ".m3u")
+info_ext = ".s4g" # aka "shuffle 4g", extension for our own files with misc info
 def make_dir_if_absent(path):
     try:
         os.makedirs(path)
@@ -95,6 +97,49 @@ def group_tracks_by_id3_template(tracks, template):
             grouped_tracks_dict[key].append(track)
 
     return sorted(grouped_tracks_dict.items())
+
+
+class MiscInfo(object):
+    json_schema_version = 1
+
+    def __init__(self, original_filename=None):
+        self.dict = {"version": self.json_schema_version}
+        if original_filename is not None:
+            self.dict["original_filename"] = original_filename
+
+    @property
+    def original_filename(self):
+        return self.dict["original_filename"]
+
+    def to_json(self):
+        return json.dumps(self.dict, indent=4)
+
+    @classmethod
+    def from_json(cls, json_str):
+        self = cls()
+        dct = json.loads(json_str)
+
+        # only current schema version is supported for now
+        if dct.get("version", 0) == self.json_schema_version:
+            try:
+                self.dict["original_filename"] = dct["original_filename"]
+            except KeyError as e:
+                pass
+
+        return self
+
+    def serialize(self, filepath):
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(self.to_json())
+
+    @classmethod
+    def deserialize(cls, filepath):
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return cls.from_json(f.read())
+        except json.JSONDecodeError as e:
+            return cls()
+
 
 class Text2Speech(object):
     valid_tts = {'pico2wave': True, 'RHVoice': True, 'espeak': True}
@@ -364,7 +409,17 @@ class Track(Record):
         if os.path.splitext(filename)[1].lower() in (".m4a", ".m4b", ".m4p", ".aa"):
             self["filetype"] = 2
 
-        text = os.path.splitext(os.path.basename(filename))[0]
+        if self.rename:
+            text = ""
+            try:
+                info = os.path.splitext(filename)[0] + info_ext
+                info_obj = MiscInfo.deserialize(info)
+                text = os.path.splitext(info_obj.original_filename)[0]
+                verboseprint("Loaded original filename for {0}: {1}".format(filename, info_obj.original_filename))
+            except (OSError, KeyError) as e:
+                pass
+        else:
+            text = os.path.splitext(os.path.basename(filename))[0]
 
         # Try to get album and artist information with mutagen
         if mutagen:
@@ -671,8 +726,19 @@ def check_unicode(path):
                 if raises_unicode_error(item):
                     src = os.path.join(path, item)
                     dest = os.path.join(path, hash_error_unicode(item)) + os.path.splitext(item)[1].lower()
+                    # same as dest, but with .s4g extension
+                    info = os.path.join(path, hash_error_unicode(item)) + info_ext
                     print('Renaming %s -> %s' % (src, dest))
                     os.rename(src, dest)
+                else:
+                    # same as original name, but with .s4g extension
+                    info = os.path.join(path, os.path.splitext(item)[0] + info_ext)
+
+                try:
+                    info_obj = MiscInfo(original_filename=item)
+                    info_obj.serialize(info)
+                except OSError as e:
+                    print("Warning: original file name for {0} is not preserved. There will be no voiceover based on the file name.".format(item))
         else:
             ret_flag = (check_unicode(os.path.join(path, item)) or ret_flag)
             if ret_flag and raises_unicode_error(item):
